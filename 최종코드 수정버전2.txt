@@ -1,0 +1,225 @@
+//1602LCD에 미세먼지 센서값을 출력하시오!
+#include "PMS.h"
+#include <PWM.h>
+#include <SoftwareSerial.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+#include<Adafruit_NeoPixel.h>
+#define PIN 6            //네오픽셀 6번핀                        
+#define NUMPIXELS 3                                   //3(네오픽셀의 led개수) 
+#define PIN_POWER1 80            //팬속도
+#define PIN_POWER2 120 
+#define PIN_POWER3 190   //팬속도
+#define PIN_POWER4 250
+#define BUTTON 2
+#define FANDOWN 65  //추가팬
+#define FANUP 10
+Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800); // 픽셀
+
+
+LiquidCrystal_I2C lcd(0x27, 20, 4);    //lcd 관련
+SoftwareSerial nockanda(4, 5); //tx=2, rx=3 //미세먼지 데이터
+Servo sv1;//클래스 생성
+Servo sv2;//클래스 생성
+int position = 140;                  //서보모터 140도
+int i = 10;                          //서보모터1
+                      
+int clockwise = 1;                          //시계방향
+int buttonup = 0;
+int attachsv2 = 1;
+int attachsv1 = 1;
+
+
+
+
+PMS pms(nockanda);          //미세먼지 센서
+PMS::DATA data;           //미세먼지 데이터
+
+int redColor = 0;               //네오픽셀
+int greenColor = 0;             //네오픽셀
+int blueColor = 0;            //네오픽셀
+
+// ================ PWM ================
+int fan = 3;                   //팬 3핀
+int32_t frequency = 25000;        //25khz 쿨러 pwm
+
+// ================ Setup ================
+void setup()
+{
+
+  InitTimersSafe();
+  Serial.begin(9600); //PC-아두이노간 통신(결과를 출력하기 위한)
+  nockanda.begin(9600);  //아두이노-미세먼지센서간 통신
+  pms.activeMode();
+  lcd.begin();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print(":-)");
+
+  sv1.attach(10);//10번핀에 서보 연결
+  sv2.attach(11);//11번핀에 서보 연결
+
+  pixels.begin();
+  pixels.show();                  //초기값 (LED 모두꺼짐)
+  pixels.setBrightness(100);      // 밝기지정 (0~255 사이값 255 일 때 가장 밝다))
+
+  SetPinFrequencySafe(fan, frequency);
+  pinMode(BUTTON, INPUT);
+}
+
+// ================ Loop ================
+void loop()
+{
+  int R = 0;
+  int G = 0;
+  int B = 0;
+  if (digitalRead(BUTTON) == HIGH) {
+    buttonup = buttonup ^ 0xfffffff1;
+    sv2.attach(11);
+    sv1.attach(10);
+    attachsv2 = 1;
+    attachsv1 = 1;
+    while (digitalRead(BUTTON) == HIGH);
+
+  }
+  if (buttonup) {
+    if (attachsv2) {
+  for(int k=FANDOWN;  k>FANUP;  k--)
+{
+      sv2.write(k);
+      delay(50);
+}
+      sv2.detach();
+      attachsv2 = 0;
+    }
+    if (clockwise)
+    { i++;//0-170으로 1도씩 이동
+      if (i == position)//끝각도
+        clockwise = 0;
+    }
+    else
+    {
+      i--;//170-0으로 1도씩 이동
+      if (i == 40)// 서보모터 시작각도
+        clockwise = 1;
+
+    }
+  }
+  else
+  {
+
+
+    if (attachsv1) {
+      i = 85;// 하강 회전서보 각도
+      sv1.write(i);
+      delay(500);
+      sv1.detach();
+      attachsv1 = 0;
+    }
+
+    if (attachsv2) {
+ for(int k=FANUP;  k>FANDOWN;  k++)
+{
+      sv2.write(k);
+      delay(50);
+}
+
+
+
+      sv2.detach();
+      attachsv2 = 0;
+    }
+  }
+
+
+//      for (int i = 0; i < NUMPIXELS; i++)
+    
+
+
+
+  sv1.write(i);
+  delay(20);
+
+  if (pms.read(data))
+  {
+    //컬럼헤더를 출력한다
+    lcd.clear();
+    lcd.setCursor(0, 1);
+    lcd.print("PM_1.0     ug/m3");
+    lcd.setCursor(0, 2);
+    lcd.print("PM_2.5     ug/m3");
+    lcd.setCursor(0, 3);
+    lcd.print("PM_1 0     ug/m3");
+    lcd.setCursor(8, 1);
+    lcd.print(data.PM_AE_UG_1_0);
+    lcd.setCursor(8, 2);
+    lcd.print(data.PM_AE_UG_2_5);
+    lcd.setCursor(8, 3);
+    lcd.print(data.PM_AE_UG_10_0);
+
+    Serial.print("PM 1.0 (ug/m3): ");
+    Serial.println(data.PM_AE_UG_1_0);
+
+    Serial.print("PM 2.5 (ug/m3): ");
+    Serial.println(data.PM_AE_UG_2_5);
+
+    Serial.print("PM 10.0 (ug/m3): ");
+    Serial.println(data.PM_AE_UG_10_0);
+
+    if (data.PM_AE_UG_10_0 >= 0 && data.PM_AE_UG_10_0 < 30) // 미세먼지 범위지정
+    {
+      pwmWrite(fan, PIN_POWER1); // PWM
+      lcd.setCursor(4, 0);
+      lcd.print("Good :-)");
+
+      R = 35;
+      G = 99;
+      B = 250;
+
+    }
+    else if (data.PM_AE_UG_10_0 >= 30 && data.PM_AE_UG_10_0 < 80) // 미세먼지 범위지정
+    {
+      pwmWrite(fan, PIN_POWER2); // PWM
+      lcd.setCursor(4, 0);
+      lcd.print("Normal :-|");
+
+      R = 0;
+      G = 255;
+      B = 0;
+    }
+    else if (data.PM_AE_UG_10_0 >= 80 && data.PM_AE_UG_10_0 < 150) // 미세먼지 범위지정
+    {
+      pwmWrite(fan, PIN_POWER3); // PWM
+      lcd.setCursor(4, 0);
+      lcd.print("Bad :-/");
+
+      R = 250;
+      G = 150;
+      B = 40;
+    }
+
+      else if (data.PM_AE_UG_10_0 >= 150 && data.PM_AE_UG_10_0 < 900) // 미세먼지 범위지정
+    {
+      pwmWrite(fan, PIN_POWER4); // PWM
+      lcd.setCursor(4, 0);
+      lcd.print("Very Bad :-(");
+
+      R = 250;
+      G = 0;
+      B = 0;
+    }
+    for (int i = 0; i < NUMPIXELS; i++)
+    {
+      pixels.setPixelColor(i, pixels.Color(R, G, B));
+      pixels.show();
+      delay(100);
+    }
+  }
+
+
+
+ 
+
+  Serial.println();
+}
